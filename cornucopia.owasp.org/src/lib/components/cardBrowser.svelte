@@ -63,7 +63,7 @@
         document.onkeydown = checkKey;
 </script>
 <noscript>
-    <div class="card-panel" id="card-face">
+    <div class="card-panel">
         <div class="left">
             <a href={cards.get(card.prevous)?.url + '/#card-face'} data-sveltekit-reload class="arrow" title="{$t('cards.cardBrowser.a1.title')}: {card.prevous}">{"<"}</a>
         </div>
@@ -75,7 +75,7 @@
         </div>
     </div>
 </noscript>
-<div class="card-panel script" id="card">
+<div class="card-panel script">
     <div class="left">
         <a href={getUrl(card)} onclick={()=>goToPrevious(card)} class="arrow" title="{$t('cards.cardBrowser.a1.title')}: {card.prevous}">{"<"}</a>
     </div>

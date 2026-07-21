@@ -48,6 +48,8 @@
     attacks = GetCardAttacks(card.id);
   });
 </script>
+<div id="card"></div>
+<div id="card-face"></div>
 <LanguagePicker 
   edition={card.edition}
   cardId={card.id}
@@ -77,6 +79,10 @@
 </div>
 
 <style>
+  #card, #card-face {
+    scroll-margin-top: 5.5rem;
+  }
+
   p {
     font-size: 1.5rem;
   }
