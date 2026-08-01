@@ -30,6 +30,13 @@ defmodule CopiWeb.ApiControllerTest do
         :error -> {:error, Ecto.Changeset.add_error(changeset, :played_in_round, "invalid")}
       end
     end
+
+    def update_all(queryable, updates, opts \\ []) do
+      case Application.get_env(:copi, :api_repo_stub_mode, :real) do
+        :real -> Copi.Repo.update_all(queryable, updates, opts)
+        :error -> {0, []}
+      end
+    end
   end
 
   setup %{conn: conn} do
@@ -244,19 +251,53 @@ defmodule CopiWeb.ApiControllerTest do
     assert json_response(conn, 503)["error"] == "Temporary service issue. Please retry."
   end
 
-  test "play_card returns 422 when dealt card update fails", %{conn: conn, game: game, player: player, dealt_card: dealt_card} do
+  test "play_card returns 409 when card was already played by another request", %{
+    conn: conn,
+    game: game,
+    player: player,
+    dealt_card: dealt_card
+  } do
     Application.put_env(:copi, :api_game_module, GameStub)
     Application.put_env(:copi, :api_repo_module, RepoStub)
     Application.put_env(:copi, :api_game_stub_mode, :real)
     Application.put_env(:copi, :api_repo_stub_mode, :error)
 
-    conn = put(conn, "/api/games/#{game.id}/players/#{player.id}/card", %{
-      "game_id" => game.id,
-      "player_id" => player.id,
-      "dealt_card_id" => to_string(dealt_card.id)
-    })
+    conn =
+      put(conn, "/api/games/#{game.id}/players/#{player.id}/card", %{
+        "game_id" => game.id,
+        "player_id" => player.id,
+        "dealt_card_id" => to_string(dealt_card.id)
+      })
 
-    assert json_response(conn, 422)["error"] == "Could not play card"
+    assert json_response(conn, 409)["error"] == "Card was already played by another request"
+  end
+
+  test "concurrent play_card requests only one succeeds", %{
+    game: game,
+    player: player,
+    dealt_card: dealt_card
+  } do
+    tasks =
+      for _ <- 1..10 do
+        Task.async(fn ->
+          build_conn()
+          |> init_test_session(%{
+            "resume_player_session" => %{"game_id" => game.id, "player_id" => player.id}
+          })
+          |> put("/api/games/#{game.id}/players/#{player.id}/card", %{
+            "dealt_card_id" => to_string(dealt_card.id)
+          })
+          |> Map.get(:status)
+        end)
+      end
+
+    results = Task.await_many(tasks, 5000)
+
+    successes = Enum.count(results, &(&1 == 200))
+    conflicts = Enum.count(results, &(&1 == 409))
+
+    assert successes == 1
+    assert conflicts == 9
   end
 
   test "exchange stores an encrypted player capability in the session", %{conn: conn, game: game, player: player} do

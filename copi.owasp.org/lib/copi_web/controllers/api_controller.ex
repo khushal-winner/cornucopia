@@ -7,6 +7,7 @@ defmodule CopiWeb.ApiController do
   alias CopiWeb.PlayerSessions
 
   require Logger
+  import Ecto.Query, only: [from: 2]
 
   @resume_player_session_key "resume_player_session"
 
@@ -119,14 +120,17 @@ defmodule CopiWeb.ApiController do
                 conn |> put_status(:forbidden) |> json(%{"error" => "Player already played a card in this round"})
 
               true ->
-                dealt_card_changeset = Ecto.Changeset.change(dealt_card, played_in_round: current_round)
-
-                case repo_mod.update(dealt_card_changeset) do
-                  {:ok, updated_dealt_card} ->
+                case repo_mod.update_all(
+                       from(dc in Copi.Cornucopia.DealtCard,
+                         where: dc.id == ^dealt_card.id and is_nil(dc.played_in_round)
+                       ),
+                       set: [played_in_round: current_round]
+                     ) do
+                  {1, _} ->
                     case game_mod.find(game.id) do
                       {:ok, updated_game} ->
                         CopiWeb.Endpoint.broadcast(topic(game.id), "game:updated", updated_game)
-                        conn |> json(%{"id" => updated_dealt_card.id})
+                        conn |> json(%{"id" => dealt_card.id})
 
                       {:error, :not_found} ->
                         Logger.warning("Game disappeared after card update: #{inspect(game.id)}")
@@ -137,9 +141,14 @@ defmodule CopiWeb.ApiController do
                         conn |> put_status(:service_unavailable) |> json(%{"error" => "Temporary service issue. Please retry."})
                     end
 
-                  {:error, changeset} ->
-                    Logger.warning("Card update failed for dealt_card_id=#{inspect(dealt_card.id)}, player_id=#{inspect(player_id)}, game_id=#{inspect(game_id)}, errors=#{inspect(changeset.errors)}")
-                    conn |> put_status(:unprocessable_entity) |> json(%{"error" => "Could not play card"})
+                  {0, _} ->
+                    Logger.warning(
+                      "Card play race for dealt_card_id=#{inspect(dealt_card.id)}, player_id=#{inspect(player_id)} in game_id=#{inspect(game_id)}"
+                    )
+
+                    conn
+                    |> put_status(:conflict)
+                    |> json(%{"error" => "Card was already played by another request"})
                 end
             end
           else
